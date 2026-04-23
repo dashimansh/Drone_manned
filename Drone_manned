@@ -1,0 +1,133 @@
+Complete Step By Step — Pure C++ Drone Simulation
+
+✅ PHASE 1 — Project Setup
+What You Did:
+
+Created new Unreal Engine Project
+Named it Drone_Sim
+Selected C++ project
+
+
+✅ PHASE 2 — C++ Files Created
+Files You Created:
+1. PIDController.h
+Controls drone stability
+Calculates thrust for each rotor
+Uses Kp, Ki, Kd values
+2. DronePawn.h / DronePawn.cpp
+Main drone class
+Handles physics
+Handles input
+Handles rotor spinning
+3. DroneHUD.h / DroneHUD.cpp
+Displays on screen:
+- Speed
+- Altitude
+- Rotor thrust values
+- Controls help
+4. DroneGameMode.h / DroneGameMode.cpp
+Sets default pawn = DronePawn
+Sets HUD = DroneHUD
+
+✅ PHASE 3 — How Drone Flies
+Complete Flight Logic:
+W Key Pressed
+      ↓
+InputThrottle increases
+      ↓
+CalculateRotorSpeeds()
+      ↓
+PID_Altitude calculates thrust
+      ↓
+All 4 rotors get thrust values
+FL=352 FR=352 BL=368 BR=368
+      ↓
+ApplyRotorPhysics()
+      ↓
+TotalThrust > Gravity (980)
+      ↓
+Drone lifts UP! 🚁
+
+✅ PHASE 4 — Unreal Engine Setup
+What You Did:
+
+Compiled C++ code successfully
+Imported drone_fab_fbx_v1 skeletal mesh
+Created BP_Drone blueprint from DronePawn
+Opened BP_Drone and assigned:
+
+DroneMesh → drone_fab_fbx_v1
+Rotor_FL  → attached to ROTOR_12 bone
+Rotor_FR  → attached to ROTOR_21 bone
+Rotor_BL  → attached to ROTOR_33 bone
+Rotor_BR  → attached to ROTOR_44 bone
+
+Assigned Shape_Cylinder to each rotor
+Set rotor scale flat: 0.5, 0.5, 0.05
+
+
+✅ PHASE 5 — Input Setup
+What You Did:
+
+Went to Edit → Project Settings → Input
+Added Axis Mappings:
+
+NameKeyScaleThrottleW1.0ThrottleS-1.0PitchUp Arrow1.0PitchDown Arrow-1.0RollRight Arrow1.0RollLeft Arrow-1.0YawE1.0YawQ-1.0
+
+Added Action Mappings:
+
+NameKeyResetDroneTToggleFPVC
+
+✅ PHASE 6 — Level Setup
+What You Did:
+
+Opened level
+Dragged BP_Drone into level
+Set GameMode Override → DroneGameMode
+Pressed Play
+
+
+✅ PHASE 7 — Result
+What Is Working:
+✅ Drone flies up with W key
+✅ Drone tilts with arrow keys
+✅ PID keeps drone stable
+✅ HUD shows speed/altitude
+✅ Rotor thrust values visible
+✅ Drone responds to all inputs
+✅ Crash detection working
+✅ Reset with T key
+✅ FPV camera with C key
+
+❌ What Is Pending:
+Propellers Not Visually Spinning:
+Reason  → Shape_Cylinder looks 
+           same from all angles
+Solution → Import real propeller mesh
+How To Fix:
+
+Go to fab.com
+Search "drone propeller free"
+Download .fbx file
+In Unreal → Content Browser → Import
+Select downloaded .fbx
+Open BP_Drone
+Assign propeller mesh to all 4 rotors
+Compile → Play
+Propellers will visually spin ✅
+
+
+🎉 Final Summary:
+Your Drone Simulation Uses:
+PIDController.h     → Stability algorithm
+DronePawn.cpp       → Flight physics + input
+DroneHUD.cpp        → Display
+DroneGameMode.cpp   → Game setup
+BP_Drone            → Visual setup
+Shape_Cylinder      → Temporary propellers
+NOT Used:
+❌ AnimBlueprint (ABP_Drone) — not needed
+❌ DroneAnimInstance — not needed
+
+
+🎯 Your drone is a complete pure C++ simulation! Only remaining task is importing a real propeller mesh from fab.com for visual spinning! 🚁
