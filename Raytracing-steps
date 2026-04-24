@@ -1,0 +1,486 @@
+Complete Step By Step — What You Did:
+
+STEP 1 — Added Ray Tracing
+Added to DronePawn.h:
+cpp// Obstacle Avoidance Settings
+UPROPERTY(EditAnywhere, Category = "Drone|Avoidance")
+    float TraceDistance = 300.f;
+
+UPROPERTY(EditAnywhere, Category = "Drone|Avoidance")
+    float AvoidanceStrength = 2.f;
+
+// Obstacle State
+bool bObstacleAhead = false;
+bool bObstacleLeft  = false;
+bool bObstacleRight = false;
+bool bObstacleAbove = false;
+bool bObstacleBelow = false;
+
+// Obstacle Functions
+void DetectObstacles();
+bool TraceInDirection(FVector Direction,
+    float Distance, FHitResult& OutHit);
+
+// Obstacle Getters
+bool IsObstacleAhead() const { return bObstacleAhead; }
+bool IsObstacleLeft()  const { return bObstacleLeft;  }
+bool IsObstacleRight() const { return bObstacleRight; }
+bool IsObstacleAbove() const { return bObstacleAbove; }
+bool IsObstacleBelow() const { return bObstacleBelow; }
+Added to DronePawn.cpp:
+cpp// New include
+#include "DrawDebugHelpers.h"
+
+// Ray trace function
+bool ADronePawn::TraceInDirection(
+    FVector Direction,
+    float   Distance,
+    FHitResult& OutHit)
+{
+    FVector Start = GetActorLocation();
+    FVector End   = Start + Direction * Distance;
+
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(this);
+
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        OutHit, Start, End,
+        ECC_Visibility, Params);
+
+    // Green = clear, Red = obstacle
+    DrawDebugLine(
+        GetWorld(), Start, End,
+        bHit ? FColor::Red : FColor::Green,
+        false, -1.f, 0, 2.f);
+
+    return bHit;
+}
+
+// Detect in all 5 directions
+void ADronePawn::DetectObstacles()
+{
+    FHitResult Hit;
+    FVector Forward = GetActorForwardVector();
+    FVector Right   = GetActorRightVector();
+    FVector Up      = GetActorUpVector();
+
+    bObstacleAhead = TraceInDirection(
+         Forward,  TraceDistance,        Hit);
+    bObstacleLeft  = TraceInDirection(
+        -Right,    TraceDistance,        Hit);
+    bObstacleRight = TraceInDirection(
+         Right,    TraceDistance,        Hit);
+    bObstacleAbove = TraceInDirection(
+         Up,       TraceDistance,        Hit);
+    bObstacleBelow = TraceInDirection(
+        -Up,       TraceDistance * 0.5f, Hit);
+}
+Added Avoidance Forces in ApplyRotorPhysics():
+cppif (bObstacleAhead)
+    Accel -= Forward * AvoidanceStrength * 200.f;
+if (bObstacleLeft)
+    Accel += Right  * AvoidanceStrength * 200.f;
+if (bObstacleRight)
+    Accel -= Right  * AvoidanceStrength * 200.f;
+if (bObstacleAbove)
+    Accel -= FVector(0, 0, AvoidanceStrength * 200.f);
+if (bObstacleBelow)
+    Accel += FVector(0, 0, AvoidanceStrength * 200.f);
+Added DetectObstacles() in Tick():
+cppvoid ADronePawn::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    if (!bCrashed)
+    {
+        DetectObstacles(); // ← Added
+        CalculateRotorSpeeds(DeltaTime);
+        ApplyRotorPhysics(DeltaTime);
+        SpinRotors(DeltaTime);
+        CheckCrash();
+    }
+}
+
+STEP 2 — Increased Movement Speed
+Changed Values in DronePawn.h:
+cpp// Old → New
+float MaxRotorThrust = 600.f;   → 1200.f
+float MaxTiltAngle   = 35.f;    → 55.f
+float Alt_Kp         = 8.f;     → 15.f
+float Alt_Kd         = 4.f;     → 6.f
+float Pitch_Kp       = 6.f;     → 12.f
+float Pitch_Kd       = 3.f;     → 5.f
+float Roll_Kp        = 6.f;     → 12.f
+float Roll_Kd        = 3.f;     → 5.f
+float Yaw_Kp         = 4.f;     → 8.f
+float Yaw_Kd         = 2.f;     → 4.f
+float MaxRotorSpeed  = 3000.f;  → 6000.f
+Changed in CalculateRotorSpeeds():
+cpp// Faster throttle
+TargetAltitude += InputThrottle * 500.f * DeltaTime;
+// was 200.f
+
+// Faster yaw
+TargetYaw += InputYaw * 180.f * DeltaTime;
+// was 90.f
+
+// Bigger clamps
+PitchOut = FMath::Clamp(PitchOut, -400.f, 400.f);
+// was 200.f
+RollOut  = FMath::Clamp(RollOut,  -400.f, 400.f);
+// was 200.f
+YawOut   = FMath::Clamp(YawOut,   -200.f, 200.f);
+// was 100.f
+Changed Drag in ApplyRotorPhysics():
+cpp// Less drag = faster movement
+Velocity *= FMath::Clamp(
+    1.f - 0.2f * DeltaTime, 0.f, 1.f);
+// was 0.5f
+
+STEP 3 — Added Missile System
+Created New Files:
+MissileActor.h
+MissileActor.cpp
+MissileActor.h:
+cpp#pragma once
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "MissileActor.generated.h"
+
+UCLASS()
+class DRONE_SIM_API AMissileActor : public AActor
+{
+    GENERATED_BODY()
+public:
+    AMissileActor();
+    void Launch(AActor* InTarget, float InSpeed);
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+private:
+    UPROPERTY(VisibleAnywhere)
+        class UStaticMeshComponent* MissileMesh;
+
+    AActor* Target       = nullptr;
+    float   MissileSpeed = 3000.f;
+    float   Lifetime     = 8.f;
+    float   ElapsedTime  = 0.f;
+    bool    bLaunched    = false;
+
+    void SeekTarget(float DeltaTime);
+    void CheckHit();
+    void Explode();
+};
+MissileActor.cpp:
+cpp#include "MissileActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
+#include "UObject/ConstructorHelpers.h"
+
+AMissileActor::AMissileActor()
+{
+    PrimaryActorTick.bCanEverTick = true;
+
+    MissileMesh = CreateDefaultSubobject
+        <UStaticMeshComponent>(TEXT("MissileMesh"));
+    RootComponent = MissileMesh;
+
+    // Assign cylinder shape
+    static ConstructorHelpers::FObjectFinder<UStaticMesh>
+        MeshAsset(TEXT("/Engine/BasicShapes/Cylinder"));
+    if (MeshAsset.Succeeded())
+    {
+        MissileMesh->SetStaticMesh(MeshAsset.Object);
+        MissileMesh->SetRelativeScale3D(
+            FVector(0.1f, 0.1f, 0.3f));
+        MissileMesh->SetRelativeRotation(
+            FRotator(90.f, 0.f, 0.f));
+    }
+    MissileMesh->SetCollisionEnabled(
+        ECollisionEnabled::QueryAndPhysics);
+}
+
+void AMissileActor::BeginPlay()
+{
+    Super::BeginPlay();
+}
+
+void AMissileActor::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    if (!bLaunched) return;
+
+    ElapsedTime += DeltaTime;
+    if (ElapsedTime >= Lifetime)
+    {
+        Explode();
+        return;
+    }
+    SeekTarget(DeltaTime);
+    CheckHit();
+}
+
+void AMissileActor::Launch(
+    AActor* InTarget, float InSpeed)
+{
+    Target       = InTarget;
+    MissileSpeed = InSpeed;
+    bLaunched    = true;
+}
+
+void AMissileActor::SeekTarget(float DeltaTime)
+{
+    if (!Target)
+    {
+        FVector Forward = GetActorForwardVector();
+        FVector NewPos  = GetActorLocation() +
+            Forward * MissileSpeed * DeltaTime;
+        SetActorLocation(NewPos);
+        return;
+    }
+
+    FVector CurrentPos = GetActorLocation();
+    FVector TargetPos  = Target->GetActorLocation();
+    FVector Direction  =
+        (TargetPos - CurrentPos).GetSafeNormal();
+
+    FRotator TargetRot  = Direction.Rotation();
+    FRotator CurrentRot = GetActorRotation();
+    FRotator NewRot     = FMath::RInterpTo(
+        CurrentRot, TargetRot, DeltaTime, 5.f);
+    SetActorRotation(NewRot);
+
+    FVector NewPos = CurrentPos +
+        Direction * MissileSpeed * DeltaTime;
+    SetActorLocation(NewPos);
+
+    DrawDebugLine(
+        GetWorld(),
+        CurrentPos, TargetPos,
+        FColor::Red,
+        false, -1.f, 0, 1.f);
+}
+
+void AMissileActor::CheckHit()
+{
+    if (!Target) return;
+    float Dist = FVector::Dist(
+        GetActorLocation(),
+        Target->GetActorLocation());
+    if (Dist < 100.f)
+        Explode();
+}
+
+void AMissileActor::Explode()
+{
+    if (GEngine)
+        GEngine->AddOnScreenDebugMessage(
+            -1, 2.f, FColor::Orange,
+            TEXT("MISSILE HIT!"));
+
+    DrawDebugSphere(
+        GetWorld(), GetActorLocation(),
+        200.f, 12, FColor::Orange,
+        false, 2.f);
+
+    DrawDebugSphere(
+        GetWorld(), GetActorLocation(),
+        100.f, 12, FColor::Red,
+        false, 2.f);
+
+    if (Target)
+    {
+        Target->Destroy();
+        Target = nullptr;
+    }
+    Destroy();
+}
+Added to DronePawn.h:
+cpp// Missile Settings
+UPROPERTY(EditAnywhere, Category = "Drone|Missile")
+    float MissileSpeed = 3000.f;
+
+UPROPERTY(EditAnywhere, Category = "Drone|Missile")
+    float LockOnRange = 2000.f;
+
+UPROPERTY(EditAnywhere, Category = "Drone|Missile")
+    float FireCooldown = 1.5f;
+
+UPROPERTY(EditAnywhere, Category = "Drone|Missile")
+    int32 MaxMissiles = 10;
+
+// Missile State
+AActor* LockedTarget      = nullptr;
+int32   MissileCount      = 10;
+float   FireCooldownTimer = 0.f;
+
+// Missile Functions
+void LockOnTarget();
+void FireMissile();
+
+// Missile Getters
+int32 GetMissileCount()  const { return MissileCount; }
+bool  HasLockedTarget()  const 
+    { return LockedTarget != nullptr; }
+Added to DronePawn.cpp:
+cpp// New includes
+#include "MissileActor.h"
+#include "EngineUtils.h"
+
+// Lock on nearest target
+void ADronePawn::LockOnTarget()
+{
+    AActor* NearestTarget = nullptr;
+    float   NearestDist   = LockOnRange;
+
+    for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+    {
+        AActor* Actor = *It;
+        if (Actor == this) continue;
+        if (Actor->IsA<APawn>()) continue;
+        if (Cast<AMissileActor>(Actor)) continue;
+        if (Actor->IsRootComponentStatic()) continue;
+
+        UStaticMeshComponent* Mesh =
+            Actor->FindComponentByClass
+            <UStaticMeshComponent>();
+        if (!Mesh) continue;
+
+        if (Actor->GetActorLocation().Z < 10.f) continue;
+
+        float Dist = FVector::Dist(
+            GetActorLocation(),
+            Actor->GetActorLocation());
+
+        if (Dist < NearestDist)
+        {
+            NearestDist   = Dist;
+            NearestTarget = Actor;
+        }
+    }
+
+    LockedTarget = NearestTarget;
+
+    if (LockedTarget)
+    {
+        DrawDebugSphere(
+            GetWorld(),
+            LockedTarget->GetActorLocation(),
+            100.f, 12, FColor::Red,
+            false, -1.f);
+
+        DrawDebugLine(
+            GetWorld(),
+            GetActorLocation(),
+            LockedTarget->GetActorLocation(),
+            FColor::Red,
+            false, -1.f, 0, 1.f);
+
+        if (GEngine)
+            GEngine->AddOnScreenDebugMessage(
+                20, 0.1f, FColor::Red,
+                TEXT("TARGET LOCKED!"));
+    }
+}
+
+// Fire missile
+void ADronePawn::FireMissile()
+{
+    if (MissileCount <= 0)
+    {
+        if (GEngine)
+            GEngine->AddOnScreenDebugMessage(
+                21, 1.f, FColor::Red,
+                TEXT("NO MISSILES LEFT!"));
+        return;
+    }
+
+    if (FireCooldownTimer > 0.f)
+    {
+        if (GEngine)
+            GEngine->AddOnScreenDebugMessage(
+                22, 0.1f, FColor::Yellow,
+                TEXT("RELOADING..."));
+        return;
+    }
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.Owner      = this;
+    SpawnParams.Instigator = GetInstigator();
+
+    FVector  SpawnLoc = GetActorLocation() +
+        GetActorForwardVector() * 100.f;
+    FRotator SpawnRot = GetActorRotation();
+
+    AMissileActor* Missile =
+        GetWorld()->SpawnActor<AMissileActor>(
+            AMissileActor::StaticClass(),
+            SpawnLoc, SpawnRot, SpawnParams);
+
+    if (Missile)
+    {
+        Missile->Launch(LockedTarget, MissileSpeed);
+        MissileCount--;
+        FireCooldownTimer = FireCooldown;
+
+        if (GEngine)
+            GEngine->AddOnScreenDebugMessage(
+                23, 1.f, FColor::Green,
+                FString::Printf(
+                    TEXT("MISSILE FIRED! Left: %d"),
+                    MissileCount));
+    }
+}
+Added Input Binding:
+cpp// In SetupPlayerInputComponent()
+PlayerInputComponent->BindAction(
+    "FireMissile", IE_Pressed,
+    this, &ADronePawn::FireMissile);
+Added in Tick():
+cppvoid ADronePawn::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    if (!bCrashed)
+    {
+        DetectObstacles();
+        LockOnTarget();        // ← Added
+        CalculateRotorSpeeds(DeltaTime);
+        ApplyRotorPhysics(DeltaTime);
+        SpinRotors(DeltaTime);
+        CheckCrash();
+    }
+    // Cooldown timer
+    if (FireCooldownTimer > 0.f)
+        FireCooldownTimer -= DeltaTime;
+}
+
+STEP 4 — Added Input In Project Settings:
+Action Mappings:
+ResetDrone  → T
+ToggleFPV   → C
+FireMissile → Space Bar ← Added
+
+Axis Mappings:
+Throttle → W(1.0) S(-1.0)
+Pitch    → Up(1.0) Down(-1.0)
+Roll     → Right(1.0) Left(-1.0)
+Yaw      → E(1.0) Q(-1.0)
+
+STEP 5 — Updated HUD
+cpp// Added obstacle status display
+// Added missile count display
+// Added target lock status
+// Added SPACE=Fire Missile control hint
+
+Final Result:
+✅ Ray tracing in 5 directions
+✅ Auto obstacle avoidance
+✅ Faster drone movement
+✅ Missile lock on system
+✅ Missile fires and tracks
+✅ Explosion on impact
+✅ Complete HUD display
+
+🎯 This is everything you did step by step!
