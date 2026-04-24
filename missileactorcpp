@@ -1,0 +1,145 @@
+#include "MissileActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
+#include "UObject/ConstructorHelpers.h"
+
+AMissileActor::AMissileActor()
+{
+    PrimaryActorTick.bCanEverTick = true;
+
+    // ── Missile Mesh ─────────────────────────────────────────
+    MissileMesh = CreateDefaultSubobject<UStaticMeshComponent>(
+        TEXT("MissileMesh"));
+    RootComponent = MissileMesh;
+
+    // ── Assign Basic Cylinder Shape ───────────────────────
+    static ConstructorHelpers::FObjectFinder<UStaticMesh>
+        MeshAsset(TEXT("/Engine/BasicShapes/Cylinder"));
+
+    if (MeshAsset.Succeeded())
+    {
+        MissileMesh->SetStaticMesh(MeshAsset.Object);
+        MissileMesh->SetRelativeScale3D(
+            FVector(0.1f, 0.1f, 0.3f));
+        MissileMesh->SetRelativeRotation(
+            FRotator(90.f, 0.f, 0.f));
+    }
+
+    MissileMesh->SetCollisionEnabled(
+        ECollisionEnabled::QueryAndPhysics);
+}
+
+void AMissileActor::BeginPlay()
+{
+    Super::BeginPlay();
+}
+
+void AMissileActor::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (!bLaunched) return;
+
+    ElapsedTime += DeltaTime;
+
+    if (ElapsedTime >= Lifetime)
+    {
+        Explode();
+        return;
+    }
+
+    SeekTarget(DeltaTime);
+    CheckHit();
+}
+
+void AMissileActor::Launch(AActor* InTarget, float InSpeed)
+{
+    Target = InTarget;
+    MissileSpeed = InSpeed;
+    bLaunched = true;
+}
+
+void AMissileActor::SeekTarget(float DeltaTime)
+{
+    if (!Target)
+    {
+        // ── No target fly straight ────────────────────────
+        FVector Forward = GetActorForwardVector();
+        FVector NewPos = GetActorLocation() +
+            Forward * MissileSpeed * DeltaTime;
+        SetActorLocation(NewPos);
+        return;
+    }
+
+    FVector CurrentPos = GetActorLocation();
+    FVector TargetPos = Target->GetActorLocation();
+    FVector Direction = (TargetPos - CurrentPos).GetSafeNormal();
+
+    // ── Rotate toward target ──────────────────────────────
+    FRotator TargetRot = Direction.Rotation();
+    FRotator CurrentRot = GetActorRotation();
+    FRotator NewRot = FMath::RInterpTo(
+        CurrentRot, TargetRot, DeltaTime, 5.f);
+    SetActorRotation(NewRot);
+
+    // ── Move toward target ────────────────────────────────
+    FVector NewPos = CurrentPos +
+        Direction * MissileSpeed * DeltaTime;
+    SetActorLocation(NewPos);
+
+    // ── Draw line to target ───────────────────────────────
+    DrawDebugLine(
+        GetWorld(),
+        CurrentPos, TargetPos,
+        FColor::Red,
+        false, -1.f, 0, 1.f);
+}
+
+void AMissileActor::CheckHit()
+{
+    if (!Target) return;
+
+    float DistToTarget = FVector::Dist(
+        GetActorLocation(),
+        Target->GetActorLocation());
+
+    if (DistToTarget < 100.f)
+    {
+        Explode();
+    }
+}
+
+void AMissileActor::Explode()
+{
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(
+            -1, 2.f, FColor::Orange,
+            TEXT("MISSILE HIT!"));
+    }
+
+    // ── Draw explosion ────────────────────────────────────
+    DrawDebugSphere(
+        GetWorld(),
+        GetActorLocation(),
+        200.f, 12,
+        FColor::Orange,
+        false, 2.f);
+
+    DrawDebugSphere(
+        GetWorld(),
+        GetActorLocation(),
+        100.f, 12,
+        FColor::Red,
+        false, 2.f);
+
+    if (Target)
+    {
+        Target->Destroy();
+        Target = nullptr;
+    }
+
+    Destroy();
+}
